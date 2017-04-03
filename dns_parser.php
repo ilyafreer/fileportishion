@@ -13,6 +13,7 @@ class checkDomain{
 	private $db;
 	public $domains;
 	public $hostDomains = [];
+	public $diffDomains = [];
 	
 	public function __construct($bd = false){
 		if($bd){
@@ -33,20 +34,26 @@ class checkDomain{
 	}
 	
 	public function getDomainsFromFile($filename){
+		$this->domains = $this->fileread($filename);
+	}
+	
+	private function fileread($filename){
+		$filerows = [];
 		$handle = @fopen($filename, "r");
 		if ($handle) {
 			while (($buffer = fgets($handle, 4096)) !== false) {
-				$this->domains[] = trim($buffer);
+				$filerows[] = trim($buffer);
 			}
 			// if (!feof($handle)) {
 				// echo "Error: unexpected fgets() fail\n";
 			// }
 			fclose($handle);
 		}
+		return $filerows;
 	}
 	
 	private function writeDomains($text,$filename){
-		$fp = fopen($filename.'.csv', 'a+');
+		$fp = fopen($filename, 'a+');
 		fwrite($fp,$text."\n");			
 		fclose($fp);
 	}
@@ -78,7 +85,7 @@ class checkDomain{
 	public function createHostNewServer(){
 		foreach($this->hostDomains as $domain){
 			$line = '212.109.216.129 '.$domain.' www.'.$domain;
-			$this->writeDomains($line,'host');
+			$this->writeDomains($line,'host.csv');
 		}
 	}
 	public function getServerStatus($newDomains = false){
@@ -86,7 +93,7 @@ class checkDomain{
 			try {
 				$dns = dns_get_record($domain);
 			} catch (ErrorException $ex) {
-				$this->writeDomains($domain.';DNS error','statusServers');
+				$this->writeDomains($domain.';DNS error','statusServers.csv');
 				continue;
 			}
 			if(!empty($dns)){
@@ -106,7 +113,7 @@ class checkDomain{
 				try {
 					$status = get_headers('http://'.$domain)[0];
 				} catch (ErrorException $ex) {
-					$this->writeDomains($domain.';get_headers error','statusServers');
+					$this->writeDomains($domain.';get_headers error','statusServers.csv');
 					continue;
 				}
 				if($line['ip']=='92.63.105.233' || $line['ip']=='212.109.216.129'){
@@ -114,17 +121,50 @@ class checkDomain{
 						$this->hostDomains[] = $domain;
 					}else{
 						$row = $domain.';'.$line['ip'].';'.$line['target'].';'.$status;
-						$this->writeDomains($row,'statusServersCorei7');
+						$this->writeDomains($row,'statusServers.csv');
 					}
 				}
 			}
 		}
 	}
+	// сравнивает содержимое двух файлов, и создает массив с доменами которых нет во втором файле
+	public function diffDomains($filename1,$filename2){
+		$domains1 = $this->fileread($filename1);
+		$domains2 = $this->fileread($filename2);
+		$this->diffDomains = array_diff($domains1,$domains2);
+	}
 	
+	public function createZoneFiles(){
+		foreach($this->diffDomains as $domain){
+			$this->createDomainZone($domain);
+		}
+	}
+	
+	private function createDomainZone($domain){
+		$data = '$TTL 3600'."\n".
+				$domain.'.	IN	SOA	les-art-resort.ru. root.example.com. (2017031600 10800 3600 604800 86400)'."\n".
+				$domain.'.	IN	NS	ns1.madmdns.ru.'."\n".
+				$domain.'.	IN	NS	ns2.madmdns.ru.'."\n".
+				$domain.'.	IN	TXT	"v=spf1 ip4:212.109.216.129 a mx ~all"'."\n".
+				$domain.'.	IN	MX	10 mail'."\n".
+				$domain.'.	IN	MX	20 mail'."\n".
+				$domain.'.	IN	A	212.109.216.129'."
+www	IN	A	212.109.216.129
+ftp	IN	A	212.109.216.129
+mail	IN	A	212.109.216.129
+smtp	IN	A	212.109.216.129
+pop	IN	A	212.109.216.129";
+		
+		// создаем записи для домена
+		$this->writeDomains($data,'zona/'.trim($domain));
+	}
 }
 
 $checkDomain = new checkDomain();
-$checkDomain->getDomainsFromFile('domains.csv');
+// $checkDomain->getDomainsFromFile('domains.csv');
 // $checkDomain->getDomainsFromBD();
-$checkDomain->getServerStatus();
+// $checkDomain->getServerStatus();
 // $checkDomain->createHostNewServer();
+$checkDomain->diffDomains('aqwareli.csv','corei7.txt');
+$checkDomain->createZoneFiles();
+// $checkDomain->debug($checkDomain->diffDomains);
